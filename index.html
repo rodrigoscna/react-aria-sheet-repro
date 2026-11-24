@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheet Arrival Repro</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 16px 20px; color: #1a1a1a; background: #fff; }
+  header { max-width: 60rem; }
+  /* Clear of the sheet, so the status stays readable while one is open. */
+  #page { max-width: calc(100vw - min(360px, 85vw) - 40px); }
+  h1 { font-size: 1.2rem; margin: 0 0 .4rem; }
+  p { margin: .3rem 0; }
+  code { font-size: .9em; background: #f1f1f1; padding: 0 .25em; border-radius: 3px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid #888; border-radius: 4px; background: #f7f7f7; cursor: pointer; }
+  button:focus-visible { outline: 2px solid #0a5ad4; outline-offset: 2px; }
+  #status { font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; border: 1px solid #ccc; border-radius: 4px; padding: 8px 10px; max-width: 60rem; }
+  #status.bad { border-color: #c62828; background: #fdecea; }
+  #status.good { border-color: #2e7d32; background: #edf7ed; }
+  #log { font: 12px/1.4 ui-monospace, monospace; color: #555; max-width: 60rem; white-space: pre-wrap; }
+  /* The sheet: styling only; the geometry is React Aria's. */
+  .react-aria-SheetOverlay { z-index: 10; }
+  .scrim { background: rgb(0 0 0 / .35); }
+  .react-aria-Sheet { width: min(360px, 85vw); height: 100%; background: #fff; border-left: 1px solid #999; box-sizing: border-box; }
+  .react-aria-SheetContent { padding: 16px; box-sizing: border-box; outline: none; }
+  .react-aria-Popover { background: #fff; border: 1px solid #888; border-radius: 4px; z-index: 20; }
+  .react-aria-Menu { padding: 4px; outline: none; min-width: 140px; }
+  .react-aria-MenuItem { padding: 4px 8px; border-radius: 3px; outline: none; cursor: default; }
+  .react-aria-MenuItem[data-focused] { background: #0a5ad4; color: #fff; }
+</style>
+</head>
+<body>
+<div id="page">
+<header>
+  <h1>Sheet stays entering, off-screen, when its arrival scroll is interrupted</h1>
+  <p><code>react-aria-components@1.22.1</code>, <code>react</code>/<code>react-dom@19.3.0</code>, Chromium.
+    A side <code>Sheet</code> enters by smooth-scrolling its <code>[data-sheet-scroll]</code> container, and <code>onEnter</code> resolves only on that container's next <code>scrollend</code>.
+    If a button inside the sheet takes focus early in that scroll, the focus's own scroll-into-view stops it short, and the sheet is left open with its panel off the window's right edge and its scrim over the page, either still <code>data-entering</code> or done entering at the exit position.
+    Issue: <a href="https://github.com/adobe/react-spectrum/issues/11015">adobe/react-spectrum#11015</a>.</p>
+  <p>The setup: <code>&lt;SheetOverlay position="right" isOpen&gt;</code> mounted fresh, as on a page load, with a <code>MenuTrigger</code> button inside it.
+    <code>Sheet</code> is a public export (<code>import {SheetOverlay, Sheet, SheetContent} from 'react-aria-components'</code>, as <code>src/main.jsx</code> does, or from <code>'react-aria-components/Sheet'</code>), implemented in <code>dist/private/Sheet.mjs</code>.
+    <code>UNSTABLE_deferUntilEntered</code> and <code>UNSTABLE_overrideFocus</code> are not props you pass: <code>SheetOverlay</code> always sets both on its <code>ModalOverlay</code>.</p>
+</header>
+
+<!-- Reopen comes last in the DOM, with nothing focusable after it before the
+     sheet's portal, so Tab from it lands on the first control in the sheet.
+     CSS order puts it first on screen. -->
+<div class="controls">
+  <label style="order: 3"><input id="workaround" type="checkbox"> Apply workaround</label>
+  <button id="reproduce" type="button" style="order: 2">Reproduce</button>
+  <button id="reopen" type="button" style="order: 1">Reopen</button>
+</div>
+<div id="status">loading…</div>
+<div id="log"></div>
+<p>The sheet opens with the page. While it is open the page behind it is inert, so close it first (<kbd>Esc</kbd>, or its <b>Close</b> button) before using these.</p>
+<p><b>Manual:</b> press <b>Reopen</b>, then press <kbd>Tab</kbd> then <kbd>Enter</kbd> while the sheet slides in.
+  The window is the first ~150 ms of a ~640 ms arrival: a Tab landing later than about 200 ms after Reopen lets the sheet arrive normally.
+  It is easiest from the keyboard: Tab to <b>Reopen</b>, then press <kbd>Enter</kbd> and <kbd>Tab</kbd> in one quick roll.
+  CPU throttling in DevTools (Performance panel → CPU, 4x to 6x) does not widen it in Chromium, since the smooth scroll runs on a clock rather than on the main thread; measured with 6x throttling, the arrival still takes ~630 ms.</p>
+<p><b>Reproduce</b> does it in one click: it reopens the sheet and, in the first frame of the arrival, focuses the menu button and presses Enter on it the way a keyboard does.</p>
+<p><b>What interrupts it</b> is the <code>focus()</code>, because it scrolls the scroller to bring the button into view; the press only opens the menu.
+  A <code>focus({preventScroll: true})</code> followed by the same Enter leaves the arrival alone.
+  Focus in the very first frame leaves the sheet <code>data-entering</code> for good, since no <code>scrollend</code> follows.
+  Focus a little later, before about 200 ms, ends with the scroller back at 0, its exited position, and a <code>scrollend</code> that resolves the enter there, so <code>data-entering</code> clears while the panel stays entirely off-screen.
+  The sheet's IntersectionObserver never saw the panel, so it does not close either.</p>
+</div>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
